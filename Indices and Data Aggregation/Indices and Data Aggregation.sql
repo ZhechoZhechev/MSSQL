@@ -163,9 +163,34 @@ GROUP BY [DepartmentID]
 GROUP BY [DepartmentID]
 HAVING MAX(Salary) NOT BETWEEN 30000 AND 70000
 
+
 -- 17. Employees Count Salaries
 
 SELECT SUM(CASE WHEN [ManagerID] IS NULL THEN 1 END) AS [Count]
                 FROM [Employees]
             GROUP BY [ManagerID]
 HAVING SUM(CASE WHEN [ManagerID] IS NULL THEN 1 END) IS NOT NULL
+
+-- 18. *3rd Highest Salary
+
+  SELECT [DepartmentID], MAX([Salary]) AS [ThirdHighestSalary] FROM 
+(
+	SELECT [DepartmentID], [Salary],
+	DENSE_RANK() OVER(PARTITION BY [DepartmentID] ORDER BY [Salary] DESC) AS [SalaryRanked]
+	FROM [Employees]
+)     AS [SalaryRankQ]
+   WHERE [SalaryRanked] = 3
+GROUP BY [DepartmentID]
+
+-- 19. **Salary Challenge
+
+SELECT TOP(10) [FirstName], [LastName], [DepartmentID]
+          FROM [Employees] AS [e]
+		 WHERE [Salary] > ( 
+							SELECT
+							AVG([Salary])
+							FROM [Employees] AS [SubE]
+							WHERE e.[DepartmentID] = SubE.[DepartmentID]
+							GROUP BY [DepartmentID]
+						  )
+      ORDER BY [DepartmentID]
