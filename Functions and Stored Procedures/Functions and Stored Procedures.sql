@@ -166,3 +166,82 @@ BEGIN
 			   AS [Full Name]
 	         FROM [AccountHolders]
 END
+
+GO
+
+-- 10. People with Balance Higher Than
+
+CREATE OR ALTER PROC usp_GetHoldersWithBalanceHigherThan (@margin MONEY)
+AS
+BEGIN
+SELECT [FirstName], [LastName] FROM [AccountHolders] AS ah
+JOIN 
+(
+	  SELECT [AccountHolderId], SUM([Balance])
+	      AS [TotalBalance] FROM [Accounts]
+	GROUP BY [AccountHolderId]
+)
+        AS [subQ]
+   ON subQ.[AccountHolderId] = ah.[Id]
+WHERE subQ.[TotalBalance] > @margin
+  ORDER BY [FirstName],
+		   [LastName]
+END
+
+
+GO
+
+-- 11. Future Value Function
+
+CREATE OR ALTER FUNCTION ufn_CalculateFutureValue(@sum DECIMAL(18, 4), @yearlyInterest FLOAT, @numOfYears INT)
+RETURNS DECIMAL(18, 4)
+BEGIN
+	RETURN @sum * POWER((1+ @yearlyInterest),@numOfYears)
+END
+
+GO
+-- 12. Calculating Interest
+
+CREATE OR ALTER PROC usp_CalculateFutureValueForAccount (@accoubtID INT, @yearlyInterest FLOAT)
+AS
+BEGIN
+	SELECT a.[Id] AS [Account Id],
+	      ah.[FirstName] AS [First Name],
+	      ah.[LastName] AS [Last Name],
+	       a.[Balance] AS [Current Balance],
+	dbo.ufn_CalculateFutureValue(a.[Balance], @yearlyInterest, 5) AS [Balance in 5 years]
+	    FROM [AccountHolders] AS ah
+	    JOIN [Accounts] AS a
+	    ON a.[AccountHolderId] = ah.[Id]
+		WHERE a.[Id] = @accoubtID
+END
+
+EXEC dbo.usp_CalculateFutureValueForAccount 4, 0.1 
+
+GO
+
+-- 13. *Cash in User Games Odd Rows
+
+USE [Diablo]
+GO
+
+CREATE FUNCTION ufn_CashInUsersGames (@gameName VARCHAR(50))
+RETURNS TABLE
+AS
+RETURN SELECT 
+SUM([Cash]) AS [SumCash]
+FROM
+(
+	SELECT ug.[Cash],
+	ROW_NUMBER() OVER(ORDER BY ug.[Cash] DESC) AS [RowNumber]
+	FROM [UsersGames] AS ug
+	JOIN [Games] AS g
+	ON ug.[GameId] = g.[Id]
+	WHERE g.[Name] = @gameName
+	
+)
+AS [subQ]
+WHERE [RowNumber] % 2 = 1
+
+GO
+
