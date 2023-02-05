@@ -161,3 +161,96 @@ SELECT TOP(5) c.[CigarName],
 	          s.[RingRange] > 2.55
      ORDER BY c.[CigarName],
 		      c.[PriceForSingleCigar] DESC
+
+-- 09. Clients with ZIP Codes
+
+SELECT [FullName], [Country], [ZIP], [CigarPrice]  FROM 
+(
+	SELECT CONCAT(c.[FirstName], ' ', c.[LastName]) AS [FullName],
+				  a.[Country],
+	              a.[ZIP],
+	CONCAT('$', cig.[PriceForSingleCigar]) AS [CigarPrice],
+	DENSE_RANK() OVER(PARTITION BY a.[ZIP] ORDER BY cig.[PriceForSingleCigar] DESC) AS [Ranks]
+	           FROM [Clients] AS c
+	      LEFT JOIN [Addresses] AS a
+	           ON c.[AddressId] = a.[Id]
+	      LEFT JOIN [ClientsCigars] AS cc
+	          ON cc.[ClientId] = c.[Id]
+	      LEFT JOIN [Cigars] AS cig
+	          ON cc.[CigarId] = cig.[Id]
+	        WHERE a.[ZIP] NOT LIKE '%[^0-9]%'
+)
+      AS [Subq]
+   WHERE [Ranks] = 1
+ORDER BY [FullName]
+
+SELECT 
+    c.FirstName + ' ' + c.LastName AS FullName,
+    a.Country,
+    a.ZIP,
+    '$' + CAST(MAX(ci.PriceForSingleCigar) AS VARCHAR) AS CigarPrice
+FROM Clients AS c
+JOIN Addresses AS a ON c.AddressId = a.Id
+JOIN ClientsCigars AS cc ON c.Id = cc.ClientId
+JOIN Cigars AS ci ON cc.CigarId = ci.Id
+WHERE a.ZIP NOT LIKE '%[A-Z]%'
+GROUP BY c.FirstName, c.LastName, a.Country, a.ZIP
+ORDER BY FullName ASC
+
+-- 10. Cigars by Size
+
+     SELECT c.[LastName],
+        AVG(s.[Length]) AS [CiagrLength],
+CEILING(AVG(s.[RingRange])) AS [CiagrRingRange]
+         FROM [Clients] AS c
+         JOIN [ClientsCigars] AS cc
+        ON cc.[ClientId] = c.[Id]
+         JOIN [Cigars] AS cig
+        ON cc.[CigarId] = cig.[Id]
+         JOIN [Sizes] AS s
+       ON cig.[SizeId] = s.[Id]
+   GROUP BY c.[LastName]
+     ORDER BY [CiagrLength] DESC
+
+-- 11. Client with Cigars
+GO
+
+CREATE FUNCTION udf_ClientWithCigars(@name NVARCHAR(30))
+RETURNS INT
+BEGIN
+	DECLARE @clientId INT
+	SET @clientId = (SELECT [Id] FROM [Clients] WHERE [FirstName] = @name)
+	DECLARE @count INT
+	SET @count = (SELECT COUNT(*) FROM [ClientsCigars] WHERE [ClientId] = @clientId)
+	RETURN @count
+END
+
+GO
+
+-- 12. Search for Cigar with Specific Taste
+
+CREATE PROC usp_SearchByTaste(@taste VARCHAR(20))
+AS
+BEGIN
+	
+	     SELECT c.[CigarName],
+	CONCAT('$', c.[PriceForSingleCigar]) AS [Price],
+	            t.[TasteType],
+	            b.[BrandName],
+		 CONCAT(s.[Length], ' ', 'cm') AS [CigarLength],
+		 CONCAT(s.[RingRange], ' ', 'cm') AS [CigarRingRange]
+		     FROM [Cigars] AS c
+		     JOIN [Tastes] AS t
+		     ON c.[TastId] = t.[Id]
+		     JOIN [Brands] AS b
+		     ON c.[BrandId] = b.[Id]
+		     JOIN [Sizes] AS s
+		     ON c.[SizeId] = s.[Id]
+	      WHERE t.[TasteType] = @taste
+	     ORDER BY [CigarLength],
+	     		  [CigarRingRange] DESC
+
+END
+
+GO
+EXEC usp_SearchByTaste 'Woody' 
