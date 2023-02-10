@@ -135,3 +135,134 @@ DATEDIFF(DAY, j.[IssueDate], '2017-04-24') AS [Days going],
 
 
 -- 7. Mechanic Performance
+
+SELECT 
+  CONCAT([FirstName], ' ', [LastName]) AS [Mechanic],
+     AVG([DaysForAJob]) AS [Average Days]
+FROM 
+(
+	   SELECT m.[FirstName],
+              m.[LastName],
+			  m.[MechanicId],
+DATEDIFF(DAY, j.[IssueDate], j.[FinishDate]) AS [DaysForAJob]
+           FROM [Mechanics] AS m
+           JOIN [Jobs] AS j
+           ON j.[MechanicId] = m.[MechanicId]
+        WHERE j.[Status] = 'Finished'
+)     AS [SubQ]
+GROUP BY [FirstName], [LastName], [MechanicId]
+ORDER BY [MechanicId]
+
+-- 8. Available Mechanics
+
+SELECT
+CONCAT([FirstName], ' ', [LastName]) AS [Available]
+FROM [Mechanics]
+WHERE [MechanicId] NOT IN 
+(
+	SELECT [MechanicId] FROM [Jobs]
+	WHERE [Status] = 'In Progress'
+)
+ORDER BY [MechanicId]
+
+-- 9. Past Expenses
+SELECT
+    [JobId],
+SUM([TotalPriceForPart]) AS [Total]
+FROM 
+(
+	SELECT
+    (pn.[Quantity] * p.[Price]) AS [TotalPriceForPart],
+    j.[JobId]
+    FROM [Jobs] AS j
+    JOIN [PartsNeeded] AS pn
+    ON pn.[JobId] = j.[JobId]
+    JOIN [Parts] AS p
+    ON pn.[PartId] = p.[PartId]
+    WHERE j.[Status] = 'Finished'
+)AS [SubQ]
+GROUP BY [JobId]
+ORDER BY [Total] DESC,
+		 [JobId] ASC
+
+-- 10. Missing Parts
+
+
+SELECT
+            p.[PartId],
+            p.[Description],
+	   SUM(pn.[Quantity]) AS [Required],
+	    SUM(p.[StockQty]) AS [In Stock],
+ISNULL(SUM(op.[Quantity]), 0) AS [Ordered]
+		 FROM [Parts] AS p
+	LEFT JOIN [PartsNeeded] pn
+		ON pn.[PartId] = p.[PartId]
+	LEFT JOIN [Jobs] AS j
+        ON pn.[JobId] = j.[JobId]
+	LEFT JOIN [Orders] AS o
+		 ON o.[JobId] = j.[JobId]
+    LEFT JOIN [OrderParts] AS op
+        ON op.[OrderId] = o.[OrderId]
+      WHERE j.[Status] <> 'Finished'
+   GROUP BY p.[PartId], p.[Description]
+HAVING SUM(pn.[Quantity]) > SUM(p.[StockQty]) + ISNULL(SUM(op.[Quantity]), 0)
+   ORDER BY p.[PartId]
+
+-- 11. Place Order
+GO
+CREATE PROC usp_PlaceOrder(@jobID INT, @serial VARCHAR(50), @quantity INT)
+AS
+BEGIN
+	IF(@jobID IN (SELECT [JobId] FROM [Jobs] WHERE [Status] = 'Finished'))
+		THROW 50011, 'This job is not active!', 1
+	IF(@quantity <= 0)
+		THROW 50012, 'Part quantity must be more than zero!', 1
+	IF(@jobID NOT IN (SELECT [JobId] FROM [Jobs]))
+		THROW 50013, 'Job not found!', 1
+	IF(@serial NOT IN (SELECT [SerialNumber] FROM [Parts]))
+		THROW 50014, 'Part not found!', 1
+
+DECLARE @partId INT = (SELECT TOP(1) PartId FROM Parts WHERE SerialNumber = @serial)
+DECLARE @orderId INT
+
+IF (@jobId IN (SELECT JobId FROM Orders WHERE IssueDate IS NULL))
+    BEGIN
+    SET @orderId = (SELECT TOP(1) OrderId FROM Orders WHERE JobId = @jobId)
+    IF (@partId IN (SELECT PartId FROM OrderParts WHERE OrderId = @OrderId))
+        BEGIN
+        UPDATE OrderParts
+            SET Quantity += @quantity 
+            WHERE OrderId = @OrderId AND PartId = @partId
+        RETURN
+        END
+    INSERT INTO OrderParts VALUES (@OrderId, @partId, @quantity)
+    RETURN
+    END
+
+INSERT INTO Orders VALUES (@jobId, NULL, 0)
+SET @orderId = (SELECT TOP(1) OrderId FROM Orders ORDER BY OrderId DESC)
+INSERT INTO OrderParts VALUES (@OrderId, @partId, @quantity)
+END
+
+
+-- 12. 	Cost Of Order
+GO
+
+CREATE FUNCTION udf_GetCost(@jobId INT)
+RETURNS DECIMAL(18, 2)
+AS
+BEGIN
+RETURN ISNULL(
+(
+	  SELECT
+	  SUM(p.[Price] * op.[Quantity])
+	   FROM [Orders] AS o
+	   JOIN [OrderParts] AS op
+	  ON op.[OrderId] = o.[OrderId]
+	   JOIN [Parts] AS p
+	  ON op.[PartId] = p.[PartId]
+	WHERE o.[JobId] = @jobId
+), 0)
+END
+
+GO
